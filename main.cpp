@@ -1,3 +1,27 @@
+//"MIT License
+
+//Copyright (c) 2021 Radhakrishnan Thangavel
+
+//Permission is hereby granted, free of charge, to any person obtaining a copy
+//of this software and associated documentation files (the "Software"), to deal
+//in the Software without restriction, including without limitation the rights
+//to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//copies of the Software, and to permit persons to whom the Software is
+//furnished to do so, subject to the following conditions:
+
+//The above copyright notice and this permission notice shall be included in all
+//copies or substantial portions of the Software.
+
+//THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//SOFTWARE.
+
+// Author: Radhakrishnan Thangavel (https://github.com/trkinvincible)
+
 #include <iostream>
 #include <shared_mutex>
 #include <chrono>
@@ -25,9 +49,9 @@ int main(int argc, char *argv[])
         desc.add_options()
             //("cache.size_of_cache", boost::program_options::value<std::string>(&d.log_file_name)->required(), "cache size available")
             ("cache.size_of_cache", boost::program_options::value<short>(&d.cache_size)->default_value(4), "cache size available")
-            ("cache.reader_file", boost::program_options::value<std::string>(&d.reader_file_name)->default_value("./res/reader_file.txt"), "reader file path+name")
-            ("cache.writer_file", boost::program_options::value<std::string>(&d.writer_file_name)->default_value("./res/writer_file.txt"), "writer file path+name")
-            ("cache.items_file", boost::program_options::value<std::string>(&d.items_file_name)->default_value("./res/item_file.txt"), "item file to write to")
+            ("cache.reader_file", boost::program_options::value<std::string>(&d.reader_file_name)->default_value("../InMemoryCacheForCpp/res/reader_file.txt"), "reader file path+name")
+            ("cache.writer_file", boost::program_options::value<std::string>(&d.writer_file_name)->default_value("../InMemoryCacheForCpp/res/writer_file.txt"), "writer file path+name")
+            ("cache.items_file", boost::program_options::value<std::string>(&d.items_file_name)->default_value("../InMemoryCacheForCpp/res/item_file.txt"), "item file to write to")
             ("cache.stratergy", boost::program_options::value<short>(&d.stratergy)->default_value(0), "Choose Cache Algorithm LFU: 0, LRU: 1")
             ("cache.cache_timeout", boost::program_options::value<int>(&d.cache_timeout)->default_value(5), "Choose Cache Algorithm LFU: 0, LRU: 1")
             ("cache.run_test", boost::program_options::value<short>(&d.run_test)->default_value(0), "choose to run test");
@@ -43,16 +67,6 @@ int main(int argc, char *argv[])
         return 0;
     }
     std::cout << config;
-
-    /*
-     * Though a static variable is just enough for singleton used this pattern for below reasons
-     * #1 - not all compiler(older ones) gurantee singleton on local static variable
-     * #2 - when memory foot print is more good to keep in heap than in global segment with limited space
-     *
-     * quiet difficult to design a perfect multi-threaded singleton class for spurious wakeups
-     * like "double-checked locking optimization"
-     * so do eager initialization when possible for better data sync
-     */
 
     if (!config.data().run_test){
 
@@ -88,6 +102,7 @@ int main(int argc, char *argv[])
         });
         locker.unlock();
 
+        std::this_thread::sleep_for(std::chrono::seconds(10));
         cache_manager->setProgramExit();
 
         w.reset();

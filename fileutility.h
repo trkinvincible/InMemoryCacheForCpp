@@ -1,3 +1,27 @@
+//"MIT License
+
+//Copyright (c) 2021 Radhakrishnan Thangavel
+
+//Permission is hereby granted, free of charge, to any person obtaining a copy
+//of this software and associated documentation files (the "Software"), to deal
+//in the Software without restriction, including without limitation the rights
+//to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//copies of the Software, and to permit persons to whom the Software is
+//furnished to do so, subject to the following conditions:
+
+//The above copyright notice and this permission notice shall be included in all
+//copies or substantial portions of the Software.
+
+//THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//SOFTWARE.
+
+// Author: Radhakrishnan Thangavel (https://github.com/trkinvincible)
+
 #ifndef FILE_UTILITY_H
 #define FILE_UTILITY_H
 
@@ -9,7 +33,6 @@
 #include <type_traits>
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
-#include <boost/utility/string_view.hpp>
 #include <boost/algorithm/string/trim.hpp>
 
 #include "config.h"
@@ -41,7 +64,7 @@ public:
             mMappedRegion.swap(mapped_region);
             char* start_address = reinterpret_cast<char*>(mMappedRegion.get_address());
             // light weight no memory allocation
-            boost::string_view sv(start_address);
+            std::string_view sv(start_address);
             mMappedRegionStringView.swap(sv);
         }catch(std::exception &exp){
 
@@ -64,7 +87,7 @@ public:
 
             if (p_Index == 1) break;
             pos = mMappedRegionStringView.find_first_of('\n', pos+1);
-            if (pos != boost::string_view::npos) count++;
+            if (pos != std::string_view::npos) count++;
             if (count == p_Index - 1) break;
         }
         if (mMappedRegionStringView[pos] == '\n') pos++;
@@ -90,7 +113,7 @@ public:
 
             if (line_number == 1) break;
             pos = mMappedRegionStringView.find_first_of('\n', pos+1);
-            if (pos != boost::string_view::npos) count++;
+            if (pos != std::string_view::npos) count++;
             if (count == line_number - 1) break;
         }
         if (mMappedRegionStringView[pos] == '\n') pos++;
@@ -107,7 +130,7 @@ public:
 private:
     const int mMaxLineNumber = 10000;
     std::shared_mutex mItemFileGuard;
-    boost::string_view mMappedRegionStringView; // light weight no memory allocation
+    std::string_view mMappedRegionStringView; // light weight no memory allocation
     boost::interprocess::mapped_region mMappedRegion;
 };
 #endif // FILE_UTILITY_H

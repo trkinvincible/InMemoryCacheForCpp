@@ -1,0 +1,10 @@
+../InMemoryCacheForCpp/res/reader1.txt
+../InMemoryCacheForCpp/res/reader2.txt
+../InMemoryCacheForCpp/res/reader3.txt
+../InMemoryCacheForCpp/res/reader4.txt
+../InMemoryCacheForCpp/res/reader5.txt
+../InMemoryCacheForCpp/res/reader6.txt
+../InMemoryCacheForCpp/res/reader7.txt
+../InMemoryCacheForCpp/res/reader8.txt
+../InMemoryCacheForCpp/res/reader9.txt
+../InMemoryCacheForCpp/res/reader10.txt
