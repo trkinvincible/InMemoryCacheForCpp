@@ -36,7 +36,7 @@
 #include "gtest.h"
 
 unsigned int Command::mMaxThreadAllowed = 1;
-std::atomic_int Command::mcurrThreadsAlive{0};
+std::atomic_int Command::mCurrThreadsAlive{0};
 
 std::shared_mutex gCheckProgramExit;
 std::condition_variable_any gCheckProgramExitConVar;
@@ -66,17 +66,17 @@ int main(int argc, char *argv[])
         std::cout << e.what();
         return 0;
     }
-    std::cout << config;
+    //std::cout << config;
 
     if (!config.data().run_test){
 
         // using redis-client key/value storage(opensource) or boost::multi_index_container will give  better performance
-        auto cache_manager = std::make_shared<CacheManager<uint, float, std::unordered_map>>(config);
+        auto cache_manager = std::make_shared<CacheManager<short, double, std::unordered_map>>(config);
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        auto w = std::make_unique<Writer<float>>(cache_manager->Self());
-        auto r = std::make_unique<Reader<float>>(cache_manager->Self());
+        auto w = std::make_unique<Writer<double>>(cache_manager->Self());
+        auto r = std::make_unique<Reader<double>>(cache_manager->Self());
         auto func_writer = [&w](){
 
             std::cout << "Excecuting Writer.." << std::endl;
@@ -94,16 +94,11 @@ int main(int argc, char *argv[])
         wt.join();
 
         std::unique_lock locker(gCheckProgramExit);
-        static int c = w->mcurrThreadsAlive;
-        gCheckProgramExitConVar.wait_for(locker, 5s, [c]()mutable {
+        gCheckProgramExitConVar.wait_for(locker, 10s, []()mutable {
 
-            c--;
+            int c = Command::mCurrThreadsAlive.load(std::memory_order_acquire);
             return (!c);
         });
-        locker.unlock();
-
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-        cache_manager->setProgramExit();
 
         w.reset();
         r.reset();

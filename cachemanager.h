@@ -37,28 +37,21 @@
 #include <boost/range/adaptor/filtered.hpp>
 
 #include "fileutility.h"
+#include "utilstructs.h"
 #include "config.h"
 
-using namespace std::chrono_literals;
-
-template<typename Key=short, typename Value=signed int, template<class, class> class HashMapStrorage=std::unordered_map>
-class ICacheInterface
+template<ALGO policy, typename Key, typename Value, template<class, class> class HashMapStrorage = std::unordered_map>
+class ICacheInterfaceImp : public ICacheInterface<Key, Value>
 {
 protected:
     using key_type = typename HashMapStrorage<Key, Value>::key_type;
     using value_type = typename HashMapStrorage<Key, Value>::mapped_type;
     using kernel_parameter_cache_size = std::size_t;
-    template <typename T>
-    using freebuffer_list_type = std::vector<std::atomic<T>>;
+    using CacheBufferType = typename FreeListContentType<policy, Key, Value>::type;
+    using freebuffer_list_type = std::vector<std::atomic<CacheBufferType>>;
     using buffer_cache_index = signed int;
 
 public:
-    enum class ALGO: int8_t{
-
-        LFU = 0,
-        MAX_POLICY
-    };
-
     enum class BUFFER_STATUS: int8_t{
 
         // life cycle of cache buffer in free list
@@ -68,7 +61,7 @@ public:
         VALID,
     };
 
-    explicit ICacheInterface(kernel_parameter_cache_size p_Maxsize, const std::string& p_FileName)
+    explicit ICacheInterfaceImp(kernel_parameter_cache_size p_Maxsize, const std::string& p_FileName)
         :mNumberOfBuffers(p_Maxsize), mFileUtility(p_FileName){}
 
     /*
@@ -93,9 +86,9 @@ public:
             }
             assert(least_frequently_used_buffer_index < mNumberOfBuffers);
 
-            std::atomic<CacheBuffer>& cache = mFreeList[least_frequently_used_buffer_index];
-            CacheBuffer buf_to_evict = cache.load(std::memory_order_acquire);
-            CacheBuffer old_cache = buf_to_evict;
+            std::atomic<CacheBufferType>& cache = mFreeList[least_frequently_used_buffer_index];
+            CacheBufferType buf_to_evict = cache.load(std::memory_order_acquire);
+            CacheBufferType old_cache = buf_to_evict;
             BUFFER_STATUS old_status = (BUFFER_STATUS)buf_to_evict.status;
             buf_to_evict.status = (short)BUFFER_STATUS::FREE;
             if(!cache.compare_exchange_strong(old_cache,buf_to_evict)){
@@ -132,8 +125,8 @@ public:
              * No writes will be done
             */
             auto &updated_cache = mFreeList[least_frequently_used_buffer_index];
-            CacheBuffer updated_buf = updated_cache.load(std::memory_order_acquire);
-            CacheBuffer new_buf;
+            CacheBufferType updated_buf = updated_cache.load(std::memory_order_acquire);
+            CacheBufferType new_buf;
             do{
                 new_buf.data = 0;
                 new_buf.status = (short)BUFFER_STATUS::BUSY;
@@ -152,62 +145,6 @@ public:
             t.detach();
 
             return least_frequently_used_buffer_index;
-        }
-    }
-
-    /*
-     * @brief       this method will return value stored in buffer cache
-     *              if the buffer has NOT been populated yet return false
-     *
-     * @return      true if data is valid false otherwise
-     *
-     * @pram        p_Index is index in free list to query, p_Value found
-    */
-    bool GetCachedValue(buffer_cache_index p_Index, value_type& p_Value){
-
-        bool ret_val;
-        assert(p_Index < mNumberOfBuffers);
-        auto &old_val = mFreeList.at(p_Index);
-        CacheBuffer temp = mFreeList.at(p_Index).load(std::memory_order_acquire);
-        //if status is free value in it must be out-dated
-        if(temp.status == (short)BUFFER_STATUS::FREE){
-
-            ret_val = false;
-        }else{
-
-            CacheBuffer new_buf = temp;
-            do{
-                new_buf.frequency++;
-            }while(!old_val.compare_exchange_weak(temp,new_buf));
-            p_Value = temp.data;
-            ret_val = true;
-        }
-        return ret_val;
-    }
-
-    /*
-     * @brief       this method will update the cache buffer with updated value
-     *
-     * @return      void
-     *
-     * @pram        p_Index is index in free list to query, p_Value is value to set
-    */
-    void SetCachedValue(buffer_cache_index p_Index,const value_type& p_Value){
-
-        assert(p_Index < mNumberOfBuffers);
-        auto &old_val = mFreeList.at(p_Index);
-        CacheBuffer temp = mFreeList.at(p_Index).load(std::memory_order_acquire);
-
-        // if BUSY cache is waiting to be over-written also stale data was flushed to file.
-        if(temp.status != (short)BUFFER_STATUS::BUSY){
-
-            CacheBuffer new_buf = temp;
-            do{
-
-                new_buf.data = p_Value;
-                new_buf.frequency++;
-                new_buf.status = (short)BUFFER_STATUS::DIRTY;
-            }while(!old_val.compare_exchange_weak(temp,new_buf));
         }
     }
 
@@ -238,8 +175,8 @@ public:
                     std::unique_lock ulk(mHashMapMutex);
 
                     auto &new_cache = mFreeList.at(new_buf_index);
-                    CacheBuffer new_buf = new_cache.load(std::memory_order_acquire);
-                    CacheBuffer to_update_buf;
+                    CacheBufferType new_buf = new_cache.load(std::memory_order_acquire);
+                    CacheBufferType to_update_buf;
                     //read the value from file
                     p_PositionValue = to_update_buf.data = mFileUtility.ReadFileAtIndex(p_Position);
                     to_update_buf.status = (short)BUFFER_STATUS::DIRTY;
@@ -290,8 +227,8 @@ public:
                 std::unique_lock ulk(mHashMapMutex);
 
                 auto &new_cache = mFreeList.at(new_buf_index);
-                CacheBuffer new_buf = new_cache.load(std::memory_order_acquire);
-                CacheBuffer to_update_buf;
+                CacheBufferType new_buf = new_cache.load(std::memory_order_acquire);
+                CacheBufferType to_update_buf;
                 to_update_buf.data = p_Value;
                 to_update_buf.status = (short)BUFFER_STATUS::DIRTY;
                 to_update_buf.frequency = 1;
@@ -310,7 +247,7 @@ public:
         }else{
 
             // Atomic update no need explicit lock;
-            SetCachedValue((*itr).second, p_Value);
+            this->SetCachedValue((*itr).second, p_Value);
         }
     }
 
@@ -323,8 +260,8 @@ public:
 
         for (const auto& item : mFreeList | boost::adaptors::indexed(0)){
 
-            CacheBuffer temp = item.value().load(std::memory_order_acquire);
-            CacheBuffer temp_updated = temp;
+            CacheBufferType temp = item.value().load(std::memory_order_acquire);
+            CacheBufferType temp_updated = temp;
             if(temp.status == (short)BUFFER_STATUS::DIRTY){
 
                 temp.status = (short)BUFFER_STATUS::VALID;
@@ -353,53 +290,41 @@ public:
     }
 
 protected:
-    /*
-     * This struct is designed to be atomic. every object will be placed in different cache line
-     * do not change the order of elements std::atomic<CacheBuffer>{}.is_lock_free() must be true always
-    */
-    struct alignas (64) CacheBuffer{
-
-        short frequency;
-        short status;
-        value_type data;
-        //short counter_4_aba;
-    };
     const buffer_cache_index INVALID_INDEX = -1;
     kernel_parameter_cache_size mNumberOfBuffers;                        //buffer cache size - NBUF
-    freebuffer_list_type<CacheBuffer> mFreeList{mNumberOfBuffers};       //cache buffers
+    freebuffer_list_type mFreeList{mNumberOfBuffers};                    //cache buffers
     FileUtility mFileUtility;
     HashMapStrorage<int, int> mCachedMemBlocks;                          //quick tracker
     std::shared_mutex mHashMapMutex;
     std::function<buffer_cache_index()> mEvictionAlgo;
 };
 
-template<typename Key=short, typename Value=signed int, template<class, class> class HashMapStrorage=std::unordered_map>
-class LFUImplementation : public ICacheInterface<Key, Value, HashMapStrorage>
+template<typename Key, typename Value, template<class, class> class HashMapStrorage=std::unordered_map>
+class LFUImplementation : public ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>
 {
     // Make dependent names for derived class
-    using value_type = typename ICacheInterface<Key, Value, HashMapStrorage>::value_type;
-    using key_type = typename ICacheInterface<Key, Value, HashMapStrorage>::key_type;
-    using buffer_cache_index = typename ICacheInterface<Key, Value, HashMapStrorage>::buffer_cache_index;
-    using CacheBuffer = typename ICacheInterface<Key, Value, HashMapStrorage>::CacheBuffer;
-    using ALGO = typename ICacheInterface<Key, Value, HashMapStrorage>::ALGO;
-    using BUFFER_STATUS = typename ICacheInterface<Key, Value, HashMapStrorage>::BUFFER_STATUS;
-    using ICacheInterface<Key, Value, HashMapStrorage>::mFreeList;
-    using ICacheInterface<Key, Value, HashMapStrorage>::INVALID_INDEX;
-    using ICacheInterface<Key, Value, HashMapStrorage>::mFileUtility;
-    using ICacheInterface<Key, Value, HashMapStrorage>::mEvictionAlgo;
-
+    using value_type = typename ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::value_type;
+    using key_type = typename ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::key_type;
+    using CacheBufferType = typename ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::CacheBufferType;
+    using buffer_cache_index = typename ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::buffer_cache_index;
+    using BUFFER_STATUS = typename ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::BUFFER_STATUS;
+    using ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::mFreeList;
+    using ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::INVALID_INDEX;
+    using ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::mFileUtility;
+    using ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::mEvictionAlgo;
 public:
-    explicit LFUImplementation(int max_size, const std::string& p_FileName)
-        :ICacheInterface<Key, Value, HashMapStrorage>(max_size, p_FileName){
 
-        ICacheInterface<Key, Value, HashMapStrorage>::mEvictionAlgo = [this]()->buffer_cache_index{
+    explicit LFUImplementation(int max_size, const std::string& p_FileName)
+        :ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>(max_size, p_FileName){
+
+        ICacheInterfaceImp<ALGO::LFU, Key, Value, HashMapStrorage>::mEvictionAlgo = [this]()->buffer_cache_index{
 
                 // When Get/Put happening do not judge free list
                 buffer_cache_index least_frequently_used_buffer_index = INVALID_INDEX;
                 short least_count = std::numeric_limits<short>::max();
                 for (const auto& item : mFreeList | boost::adaptors::indexed(0)){
 
-                    CacheBuffer temp = item.value().load(std::memory_order_acquire);
+                    CacheBufferType temp = item.value().load(std::memory_order_acquire);
                     //some other thread must be trying to acquire the same buffer
                     if(temp.status != (short)BUFFER_STATUS::BUSY){
 
@@ -414,16 +339,80 @@ public:
                 return least_frequently_used_buffer_index;
         };
     }
+
+    /*
+     * @brief       this method will return value stored in buffer cache
+     *              if the buffer has NOT been populated yet return false
+     *
+     * @return      true if data is valid false otherwise
+     *
+     * @pram        p_Index is index in free list to query, p_Value found
+    */
+    bool GetCachedValue(buffer_cache_index p_Index, value_type& p_Value){
+
+        assert(p_Index < this->mNumberOfBuffers);
+        bool ret_val;
+        auto &old_val = mFreeList.at(p_Index);
+        CacheBufferType temp = old_val.load(std::memory_order_acquire);
+        //if status is free value in it must be out-dated
+        if(temp.status == (short)BUFFER_STATUS::FREE){
+
+            ret_val = false;
+        }else{
+
+            CacheBufferType new_buf;
+            do{
+
+                new_buf = temp;
+                new_buf.frequency++;
+            }while(!old_val.compare_exchange_weak(temp,new_buf));
+
+            p_Value = temp.data;
+            ret_val = true;
+        }
+
+        return ret_val;
+    }
+
+    /*
+     * @brief       this method will update the cache buffer with updated value
+     *
+     * @return      void
+     *
+     * @pram        p_Index is index in free list to query, p_Value is value to set
+    */
+    void SetCachedValue(buffer_cache_index p_Index,const value_type& p_Value){
+
+        assert(p_Index < this->mNumberOfBuffers);
+        auto &old_val = mFreeList.at(p_Index);
+        CacheBufferType temp = old_val.load(std::memory_order_acquire);
+
+        // if BUSY cache is waiting to be over-written also stale data was flushed to file.
+        if(temp.status != (short)BUFFER_STATUS::BUSY){
+
+            CacheBufferType new_buf;
+            do{
+
+                new_buf = temp;
+                new_buf.data = p_Value;
+                new_buf.frequency++;
+                new_buf.status = (short)BUFFER_STATUS::DIRTY;
+            }while(!old_val.compare_exchange_weak(temp,new_buf));
+        }
+    }
+
+public:
+
+
+    static constexpr auto mCacheBufType = ALGO::LFU;
 };
 
-template<typename Key=short, typename Value=signed int, template<class, class> class HashMapStrorage=std::unordered_map>
+template<typename Key, typename Value, template<class, class> class HashMapStrorage=std::unordered_map>
 class CacheManager : public std::enable_shared_from_this<CacheManager<Key, Value, HashMapStrorage>>
 {
-    using cache_impl_type = std::unique_ptr<ICacheInterface<Key, Value, HashMapStrorage>>;
+    using cache_impl_type = std::unique_ptr<ICacheInterface<Key, Value>>;
     using self_type = CacheManager<Key, Value, HashMapStrorage>;
     using self_type_ptr = std::shared_ptr<self_type>;
-    using ALGO = typename ICacheInterface<Key, Value, HashMapStrorage>::ALGO;
-    using BUFFER_STATUS = typename ICacheInterface<Key, Value, HashMapStrorage>::BUFFER_STATUS;
     using kernel_parameter_time_seconds = std::chrono::seconds;
 
 public:
@@ -433,7 +422,6 @@ public:
     CacheManager(const cache_config& p_Config) noexcept
         :mCacheConfig(p_Config){
 
-        mImplementor = nullptr;
         mCacheTimeOut = std::chrono::seconds(mCacheConfig.data().cache_timeout);
         ALGO s = (mCacheConfig.data().stratergy == 0 ? ALGO::LFU : ALGO::LFU);
         try{
@@ -448,19 +436,19 @@ public:
     CacheManager(const CacheManager &rhs) = delete;
     CacheManager& operator=(const CacheManager &rhs) = delete;
 
-    operator bool(){
-
-        // Without settings Algorithm CacheManager is Invalid
-        return (mImplementor != nullptr);
-    }
-
-    void setProgramExit(){
+    ~CacheManager(){
 
         /*
          * Exit the thread flusing cache to file
          * memory mapped file will be unmapped once FileUtility object gets deleted
         */
-        mDone = true;
+        mDone.store(true, std::memory_order_release);
+    }
+
+    operator bool(){
+
+        // Without settings Algorithm CacheManager is Invalid
+        return (mImplementor != nullptr);
     }
 
     self_type_ptr Self(){
@@ -513,7 +501,7 @@ private:
 
 private:
     std::atomic_bool mDone = false;
-    cache_impl_type mImplementor = nullptr;
+    cache_impl_type mImplementor;
     const cache_config& mCacheConfig;
     kernel_parameter_time_seconds mCacheTimeOut;        //buffer cache flush timeout - BDFLUSHR
     kernel_parameter_time_seconds mDelayedWriteTimeout; //delayed write flush timeout - NAUTOUP

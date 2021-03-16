@@ -22,27 +22,44 @@
 
 // Author: Radhakrishnan Thangavel (https://github.com/trkinvincible)
 
-#ifndef COMMAND_H
-#define COMMAND_H
+#ifndef UTIL_HPP
+#define UTIL_HPP
 
-#include <string>
-#include <condition_variable>
-#include <mutex>
-#include <atomic>
-#include "cachemanager.h"
+using namespace std::chrono_literals;
 
-class Command
-{
-public:
-    Command(){
+enum class ALGO: int8_t{
 
-        mMaxThreadAllowed = std::thread::hardware_concurrency();
-    }
-    virtual ~Command(){}
-    virtual void execute()=0;
-public:
-    static unsigned int mMaxThreadAllowed;
-    static std::atomic_int mCurrThreadsAlive;
+    LFU = 0,
+    MAX_POLICY
 };
 
-#endif // COMMAND_H
+/*
+ * These struct is designed to be atomic. every object will be placed in different cache line
+ * do not change the order of elements std::atomic<CacheBuffer>{}.is_lock_free() must be true always
+*/
+template<typename Key = short, typename Value = signed int>
+struct alignas (64) LFUCacheBuffer{
+
+    short frequency;
+    short status;
+    Value data;
+    //short counter_4_aba;
+};
+
+template<typename Key, typename Value>
+class ICacheInterface {
+public:
+
+    virtual bool GetCachedValue(int p_Index, Value& p_Value) = 0;
+    virtual void SetCachedValue(int p_Index,const Value& p_Value) = 0;
+    virtual const bool Get(const Key& p_Position, Value& p_PositionValue) = 0;
+    virtual void Put(const Key& p_Position, const Value& p_Value)  = 0;
+    virtual void Flush() = 0;
+};
+
+template<ALGO policy, typename Key, typename Value> struct FreeListContentType { using type = LFUCacheBuffer<Key, Value>; };
+template<typename Key, typename Value> struct FreeListContentType<ALGO::LFU, Key, Value> { using type = LFUCacheBuffer<Key, Value>; };
+
+
+#endif /* UTIL_HPP */
+

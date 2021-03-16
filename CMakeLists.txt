@@ -26,6 +26,7 @@ SET( _HEADER_
     ${CMAKE_CURRENT_SOURCE_DIR}/reader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fileutility.h
     ${CMAKE_CURRENT_SOURCE_DIR}/config.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/utilstructs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gtest.h
 )
 

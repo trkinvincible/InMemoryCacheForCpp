@@ -41,8 +41,11 @@ extern std::condition_variable_any gCheckProgramExitConVar;
 template<typename DATA>
 class Writer : public Command
 {
+    using key_type = typename CacheManager<short, DATA>::key_type;
+    using value_type = typename CacheManager<short, DATA>::value_type;
+
 public:
-    Writer(std::shared_ptr<CacheManager<uint, DATA>> cache_manager)
+    Writer(auto cache_manager)
         :mCacheManager(cache_manager){}
 
     virtual ~Writer(){
@@ -63,7 +66,29 @@ public:
              * Using std::string_view to gurantee "Zero Copying" to yield better performance
             */
             std::string_view input_text(start_address);
-            std::regex r(R"(^.*)");
+            std::regex r("^.*#");
+            /*
+             * raison d'être:
+             * linux with fair scheduler will not let thread priority numbers
+             * So find out high clock speed cores and assign high priority task
+             * trick is divide task to run only in designated cores to avoid posibility
+             * of one task blocking other for longer period
+            */
+            std::once_flag flg;
+            cpu_set_t cpuset;
+            std::call_once(flg, [&cpuset](){
+
+                CPU_ZERO(&cpuset);
+                /*
+                 * Do hyper-threading for low latency as my i7 can support already with 4 core per processor.
+                 * CPU affinity:
+                 *  0,2, etc.. for writer
+                 *  1,3, etc.. fostartConsumerr reader
+                */
+                for(int cpu_index = 0; cpu_index < mMaxThreadAllowed; cpu_index += 2){
+
+                    CPU_SET(cpu_index,&cpuset);
+            }});
             for(std::cregex_iterator i = std::cregex_iterator(input_text.begin(), input_text.end(), r);
                 i != std::cregex_iterator();
                 ++i)
@@ -73,17 +98,11 @@ public:
                  * When spawning (no. of threads > available computing units) it will do more harm as
                  * frequent context switching is costly
                 */
-                while(static_cast<int>(mcurrThreadsAlive) >= mMaxThreadAllowed){
+                while(static_cast<int>(mCurrThreadsAlive.load(std::memory_order_relaxed)) >= mMaxThreadAllowed){
 
-                    std::this_thread::yield();
+                    std::this_thread::sleep_for(10ms);
                 }
-                /*
-                 * raison d'être:
-                 * linux with fair scheduler will not let thread priority numbers
-                 * So find out high clock speed cores and assign high priority task
-                 * trick is divide task to run only in designated cores to avoid posibility
-                 * of one task blocking other for longer period
-                */
+
                 std::packaged_task<std::string(std::string)> task(std::bind(&Writer::writeToOutput,this,
                                                                             std::placeholders::_1));
                 vec_future.push_back(std::move(task.get_future()));
@@ -95,23 +114,13 @@ public:
                     continue;
                 }
                 std::thread t(std::move(task), f);
-                cpu_set_t cpuset;
-                CPU_ZERO(&cpuset);
-                /*
-                 * Do hyper-threading for low latency as my i7 can support already with 4 core per processor.
-                 * CPU affinity:
-                 *  0,2, etc.. for writer
-                 *  1,3, etc.. for reader
-                */
-                for(int cpu_index = 0; cpu_index < mMaxThreadAllowed; cpu_index += 2){
-
-                    CPU_SET(cpu_index, &cpuset);
-                }
                 int rc = pthread_setaffinity_np(t.native_handle(),sizeof(cpu_set_t), &cpuset);
                 if (rc != 0) {
 
                     std::cerr << "Error calling pthread_setaffinity_np: " << rc << std::endl;
                 }
+                Command::mCurrThreadsAlive.fetch_add(1, std::memory_order_acq_rel);
+                std::cout << __PRETTY_FUNCTION__ << "   mCurrThreadsAlive: " << mCurrThreadsAlive.load() << std::endl;
                 t.detach();
             }
         }catch(std::exception &exp){
@@ -150,8 +159,8 @@ public:
                     if(values.size() >= 2){
 
                         try{
-                            CacheManager<>::key_type key = boost::lexical_cast<CacheManager<>::key_type>(values[0]);
-                            CacheManager<>::value_type value = boost::lexical_cast<CacheManager<>::value_type>(values[1]);
+                            key_type key = boost::lexical_cast<key_type>(values[0]);
+                            value_type value = boost::lexical_cast<value_type>(values[1]);
                             //std::cout << __FUNCTION__ << "  Check Point: 1" << std::endl;
                             mCacheManager->Put(key, value);
                             //std::cout << __FUNCTION__ << "  Check Point: 10" << std::endl;
@@ -170,12 +179,11 @@ public:
             std::cout << exp.what() << std::endl;
         }
 
+        Command::mCurrThreadsAlive.fetch_sub(1, std::memory_order_acq_rel);
         std::cout << "Completed : " << filename << std::endl;
-        lk.unlock();
-        gCheckProgramExitConVar.notify_all();
         return "success";
     }
 
 private:
-    std::shared_ptr<CacheManager<uint, DATA>> mCacheManager;
+    std::shared_ptr<CacheManager<short, DATA>> mCacheManager;
 };
